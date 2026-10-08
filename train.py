@@ -20,7 +20,7 @@ from lib.data_loader_triplet import (
     SingleTextEditDataset,
     TripletEditDataset,
 
-    # Prepare / dataset utilities
+
     convert_triplets_to_single_samples,
     is_triplet_format,
     load_json_list,
@@ -28,12 +28,11 @@ from lib.data_loader_triplet import (
     prepare_triplets_with_offline_degree,
     save_json_list,
 
-    # Raw Top-k pseudo-triplet utilities
+
     load_label_only_samples,
     rank_topk_anchor_candidates,
     safe_text,
 
-    # Semantic / likelihood retrieval utilities
     load_metric_model_and_tokenizer,
     compute_lm_pool_features_batch,
     fit_token_ll_feature_scaler,
@@ -403,8 +402,7 @@ def main_train(args):
         else None
     )
 
-    # best_cls = {"score": -float("inf"), "epoch": -1, "state": None}
-    # best_degree = {"score": -float("inf"), "epoch": -1, "state": None}
+
     best_cls = {"score": -float("inf"), "epoch": -1}
     best_degree = {"score": -float("inf"), "epoch": -1}
     
