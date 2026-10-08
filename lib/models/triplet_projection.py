@@ -4,18 +4,10 @@ import torch
 import torch.nn.functional as F
 from transformers import AutoModelForCausalLM
 
-#加入confidence损失 进行 对新的 confidence 语义在训练阶段不被破坏
 
 
 class RobertaTripletProjectionRegressor(torch.nn.Module):
-    """
-    Decoder-only LLM backbone with:
-      1. human/edited/AI classification;
-      2. scalar edit-degree prediction in [0, 1];
-      3. Human-relative magnitude supervision for Edited text.
 
-    The historical class name is retained to avoid breaking imports.
-    """
 
     def __init__(
         self,
@@ -52,11 +44,6 @@ class RobertaTripletProjectionRegressor(torch.nn.Module):
         self.use_lora = use_lora
         self.freeze_backbone = freeze_backbone
 
-        # self.backbone = AutoModelForCausalLM.from_pretrained(
-        #     model_path,
-        #     torch_dtype="auto",
-        #     trust_remote_code=True,
-        # )
         
         self.backbone = AutoModelForCausalLM.from_pretrained(
             model_path,
@@ -103,7 +90,7 @@ class RobertaTripletProjectionRegressor(torch.nn.Module):
             torch.nn.Tanh(),
         )
 
-        # Student Beta distribution over edit degree.
+
         self.degree_dist_head = torch.nn.Sequential(
             torch.nn.Linear(proj_dim, 128),
             torch.nn.ReLU(),
@@ -130,7 +117,7 @@ class RobertaTripletProjectionRegressor(torch.nn.Module):
         return ["q_proj", "k_proj", "v_proj", "o_proj"]
 
     def encode(self, input_ids, attention_mask):
-        """Use the last valid token hidden state as the text representation."""
+
         outputs = self.backbone(
             input_ids=input_ids,
             attention_mask=attention_mask,
@@ -246,7 +233,7 @@ class RobertaTripletProjectionRegressor(torch.nn.Module):
         z_x,
         z_h,
     ):
-        """Initial model-space Human-relative magnitude: ||z_x-z_h||/2."""
+
         return torch.norm(z_x - z_h, dim=-1) / 2.0
 
     @staticmethod
@@ -256,13 +243,7 @@ class RobertaTripletProjectionRegressor(torch.nn.Module):
         z_a,
         eps: float = 1e-12,
     ):
-        """
-        Restore the original model-space AI-anchor correction:
 
-            l_e = ||z_x - z_h|| / 2
-            l_a = ||z_a - z_h|| / 2
-            degree = l_e / l_a
-        """
         edited_initial = torch.norm(z_x - z_h, dim=-1) / 2.0
         ai_initial = torch.norm(z_a - z_h, dim=-1) / 2.0
         return edited_initial / ai_initial.clamp(min=eps)
@@ -281,7 +262,7 @@ class RobertaTripletProjectionRegressor(torch.nn.Module):
             eps=eps,
         )
 
-    # Compatibility alias for old external calls.
+
     project_alpha_raw = ai_corrected_magnitude_raw
 
     @staticmethod
@@ -347,9 +328,7 @@ class RobertaTripletProjectionRegressor(torch.nn.Module):
         batch_size = z_h.size(0)
         device = z_h.device
 
-        # =========================================================
-        # 1. 三类编辑度目标
-        # =========================================================
+
         target_h = torch.zeros(
             batch_size,
             device=device,
@@ -368,11 +347,6 @@ class RobertaTripletProjectionRegressor(torch.nn.Module):
             device=device,
         )
 
-        # =========================================================
-        # 2. 原始 confidence
-        #
-        # 用于控制 Teacher Beta 的分布集中程度。
-        # =========================================================
         confidence_e = (
             torch.ones(
                 batch_size,
@@ -397,12 +371,7 @@ class RobertaTripletProjectionRegressor(torch.nn.Module):
             target_a
         )
 
-        # =========================================================
-        # 3. Loss 权重
-        #
-        # 原始 confidence 已经通过 kappa 影响 Teacher Beta。
-        # 使用 sqrt 映射减轻二次加权导致的过度削弱。
-        # =========================================================
+
         loss_weight_e = (
             0.05
             + 0.95
@@ -411,9 +380,6 @@ class RobertaTripletProjectionRegressor(torch.nn.Module):
             )
         )
 
-        # =========================================================
-        # 4. 构造 Teacher Beta
-        # =========================================================
         teacher_h = self.make_teacher_beta(
             target_h,
             confidence_h,
@@ -429,9 +395,7 @@ class RobertaTripletProjectionRegressor(torch.nn.Module):
             confidence_a,
         )
 
-        # =========================================================
-        # 5. Beta KL loss
-        # =========================================================
+
         kl_h = self.beta_kl_divergence(
             *teacher_h,
             alpha_h_s,
@@ -459,9 +423,7 @@ class RobertaTripletProjectionRegressor(torch.nn.Module):
             + kl_a.mean()
         ) / 3.0
 
-        # =========================================================
-        # 6. Degree regression loss
-        # =========================================================
+
         degree_h_loss = F.smooth_l1_loss(
             degree_h,
             target_h,
@@ -492,9 +454,7 @@ class RobertaTripletProjectionRegressor(torch.nn.Module):
             + degree_a_loss
         ) / 3.0
 
-        # =========================================================
-        # 7. 模型空间 AI-anchor loss
-        # =========================================================
+
         anchor_degree_raw = (
             self.ai_corrected_magnitude_raw(
                 z_e,
@@ -569,7 +529,7 @@ class RobertaTripletProjectionRegressor(torch.nn.Module):
                 alignment_e.detach().mean()
             ),
 
-            # 新增
+
             "degree_confidence_mean": (
                 confidence_e.detach().mean()
             ),
