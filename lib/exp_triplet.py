@@ -6,7 +6,7 @@ import torch
 
 
 def seed_everything(seed: int, deterministic: bool = True) -> None:
-    """Set random seeds used by the triplet projection experiments."""
+
     os.environ["PYTHONHASHSEED"] = str(seed)
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -27,7 +27,7 @@ def seed_everything(seed: int, deterministic: bool = True) -> None:
 
 
 def normalize_label(label):
-    """Map labels to: 0=human, 1=edited, 2=AI."""
+
     if isinstance(label, str):
         value = label.strip().lower()
         if value in {
@@ -56,13 +56,7 @@ import math
 
 
 def compute_edited_degree_stats(prepared, split_name):
-    """
-    统计当前 split 中所有有效 edited_degree。
 
-    方差和标准差采用总体统计：
-        variance = sum((x - mean) ** 2) / N
-        std = sqrt(variance)
-    """
     edited_degrees = []
 
     for index, item in enumerate(prepared):
@@ -112,10 +106,9 @@ def compute_edited_degree_stats(prepared, split_name):
             "edited_degree_std": None,
         }
 
-    # 使用 math.fsum 减少浮点数累加误差
+
     mean_value = math.fsum(edited_degrees) / count
 
-    # 总体方差：除以 N
     variance_value = math.fsum(
         (value - mean_value) ** 2
         for value in edited_degrees
