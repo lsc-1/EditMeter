@@ -20,9 +20,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from lib_sep_4methond_distance_logall_0.exp_triplet import normalize_label
 
-##你现在离线部分已经把 confidence 改成了 [0,1]，并且 Fusion confidence 加入了方法分歧和覆盖率；
-# 但训练代码仍然在 Dataset、forward() 和 make_teacher_beta() 中把 confidence 强制抬到至少 0.05。
-# 同时，同一个 confidence 既控制 Teacher Beta 的尖锐程度，又直接加权三项 loss，低 confidence 样本会被重复削弱。
+
 
 
 DEGREE_METHODS = (
@@ -34,19 +32,9 @@ DEGREE_METHODS = (
     "fusion",
 )
 
-# Select any non-empty subset of the three supported features.
-# The order written here is also the output-vector order.
-#
-# Examples:
-# TOKEN_LL_FEATURE_NAMES = ("log_local_roughness",)
-# TOKEN_LL_FEATURE_NAMES = ("mean_nll", "log_local_roughness")
-# TOKEN_LL_FEATURE_NAMES = (
-#     "mean_nll",
-#     "log_fluctuation_energy",
-#     "log_local_roughness",
-# )
+
 TOKEN_LL_FEATURE_NAMES = (
-    #"mean_nll",
+
     "log_fluctuation_energy",
     "log_local_roughness",
 )
@@ -61,12 +49,6 @@ SUPPORTED_TOKEN_LL_FEATURE_NAMES = (
 def validate_token_ll_feature_names(
     feature_names=None,
 ) -> tuple[str, ...]:
-    """
-    Validate and return the active token-LL feature configuration.
-
-    Any non-empty subset of SUPPORTED_TOKEN_LL_FEATURE_NAMES is allowed.
-    The configured order is preserved and determines vector order.
-    """
     names = tuple(
         TOKEN_LL_FEATURE_NAMES
         if feature_names is None
@@ -99,7 +81,7 @@ def validate_token_ll_feature_names(
     return names
 
 
-# Fail early at import time when the source configuration is invalid.
+
 validate_token_ll_feature_names()
 
 
@@ -121,7 +103,7 @@ def tokenize_words(text: str) -> list[str]:
 
 
 class TripletEditDataset(Dataset):
-    """One human/edited/AI triplet with a scalar target per item."""
+
 
     def __init__(self, triplets, tokenizer, max_length: int = 512):
         self.tokenizer = tokenizer
@@ -191,39 +173,29 @@ def safe_float_meta(item, key, default=-1.0):
 
 
 class SingleTextEditDataset(Dataset):
-    """Validation/test data for three-way classification and degree regression."""
+
 
     METADATA_KEYS = (
         "polish_ratio",
-
-        # 各方法未裁剪 degree
         "levenshtein_degree_raw",
         "jaccard_degree_raw",
         "semantic_degree_raw",
         "likelihood_degree_raw",
         "fusion_degree_raw",
-
-        # 各方法最终 degree
         "levenshtein_degree",
         "jaccard_degree",
         "semantic_degree",
         "likelihood_degree",
         "fusion_degree",
-
-        # 各方法 confidence
         "levenshtein_confidence",
         "jaccard_confidence",
         "semantic_confidence",
         "likelihood_confidence",
         "fusion_confidence",
-
-        # 最终选中结果
         "edited_initial_degree",
         "ai_initial_degree",
         "ai_correction_ratio",
         "ai_scale",
-
-        # 各方法初始量
         "levenshtein_edited_initial_degree",
         "levenshtein_ai_initial_degree",
         "jaccard_edited_initial_degree",
@@ -235,11 +207,9 @@ class SingleTextEditDataset(Dataset):
         "fusion_edited_initial_degree",
         "fusion_ai_initial_degree",
 
-        # Likelihood 诊断量
         "likelihood_edited_structure_distance",
         "likelihood_ai_structure_distance",
 
-        # Fusion 权重
         "fusion_weight_levenshtein",
         "fusion_weight_jaccard",
         "fusion_weight_semantic",
@@ -386,10 +356,6 @@ def convert_triplets_to_single_samples(triplets):
     return samples
 
 
-# -----------------------------------------------------------------------------
-# Four endpoint-calibrated edit-degree methods
-# -----------------------------------------------------------------------------
-
 
 def normalized_levenshtein_distance(x: str, y: str) -> float:
     x = safe_text(x)
@@ -411,23 +377,7 @@ def token_jaccard_distance(x: str, y: str) -> float:
 
 @dataclass
 class DegreeResult:
-    """
-    Human-relative edit-degree result.
 
-    edited_initial_degree:
-        Degree computed only from the Human--Edited pair.
-
-    ai_initial_degree:
-        Human--AI distance retained only as diagnostic metadata. It never
-        divides, rescales, or otherwise changes the edited degree.
-
-    raw:
-        Unclipped human-relative degree. For the current methods this is
-        already designed to lie in or near [0, 1].
-
-    direction:
-        Alignment with the Human->AI direction. This is metadata only.
-    """
 
     raw: float | None
     clipped: float
@@ -453,7 +403,6 @@ class DegreeResult:
             f"{prefix}_anchor_valid": self.valid,
             f"{prefix}_anchor_gap": self.anchor_gap,
             f"{prefix}_ai_alignment": self.direction,
-            # Backward-compatible aliases.
             f"{prefix}_direction": self.direction,
             f"{prefix}_residual": self.residual,
         }
@@ -485,7 +434,7 @@ def human_relative_degree_result(
     residual: float = 0.0,
     confidence: float = 1.0,
 ) -> DegreeResult:
-    """Compatibility helper for an uncorrected Human-relative degree."""
+
     l_e = float(edited_initial_degree)
     l_a = float(ai_initial_degree)
     values = np.asarray([l_e, l_a, alignment, residual], dtype=np.float64)
@@ -520,39 +469,7 @@ def ai_correct_initial_degree(
     overshoot_tau: float = 1.0,
     residual_tau: float = 1.0,
 ) -> DegreeResult:
-    """
-    使用 AI anchor 对 Human-relative 编辑度进行归一化。
-
-    编辑度：
-        raw_degree =
-            edited_initial_degree
-            / ai_initial_degree
-
-    confidence 由四部分组成：
-
-        1. anchor confidence：
-           AI 与 Human 是否具有足够大的距离；
-
-        2. overshoot confidence：
-           Edited 是否明显超过 AI anchor；
-
-        3. alignment confidence：
-           Edited 的变化方向是否与 Human -> AI 一致；
-
-        4. residual confidence：
-           Edited 是否偏离 Human -> AI 主方向。
-
-    最终：
-
-        confidence =
-            anchor_confidence
-            * overshoot_confidence
-            * geometry_confidence
-    """
-
-    # =========================================================
-    # 1. 转换与有效性检查
-    # =========================================================
+   
     l_e = float(
         edited_initial_degree
     )
@@ -589,9 +506,7 @@ def ai_correct_initial_degree(
             edited_initial_degree=l_e,
         )
 
-    # =========================================================
-    # 2. 检查 confidence 超参数
-    # =========================================================
+
     anchor_tau = float(
         anchor_tau
     )
@@ -628,9 +543,7 @@ def ai_correct_initial_degree(
             "residual_tau must be a finite positive value."
         )
 
-    # =========================================================
-    # 3. 规范化 alignment 和 residual
-    # =========================================================
+
     alignment = float(
         np.clip(
             alignment,
@@ -644,9 +557,7 @@ def ai_correct_initial_degree(
         0.0,
     )
 
-    # =========================================================
-    # 4. AI-anchor 编辑度修正
-    # =========================================================
+
     correction_ratio = float(
         (1.0 - l_a) / l_a
     )
@@ -667,11 +578,6 @@ def ai_correct_initial_degree(
         )
     )
 
-    # =========================================================
-    # 5. Anchor confidence
-    #
-    # AI 与 Human 越远，使用 AI 作为分母越稳定。
-    # =========================================================
     anchor_confidence = float(
         1.0
         - math.exp(
@@ -679,12 +585,6 @@ def ai_correct_initial_degree(
         )
     )
 
-    # =========================================================
-    # 6. Overshoot confidence
-    #
-    # 当 raw <= 1 时没有惩罚；
-    # 当 raw > 1 时，Edited 超过 AI anchor，降低 confidence。
-    # =========================================================
     overshoot = max(
         0.0,
         raw - 1.0,
@@ -696,23 +596,14 @@ def ai_correct_initial_degree(
         )
     )
 
-    # =========================================================
-    # 7. Geometry confidence
-    #
-    # 如果 Edited 与 Human 几乎相同，方向本身没有定义，
-    # 此时不应该因为 alignment=0 而惩罚 confidence。
-    # =========================================================
+
     if l_e <= anchor_eps:
         alignment_confidence = 1.0
         residual_confidence = 1.0
         geometry_confidence = 1.0
 
     else:
-        # alignment 范围从 [-1, 1] 映射到 [0, 1]
-        #
-        # alignment =  1 -> confidence = 1
-        # alignment =  0 -> confidence = 0.5
-        # alignment = -1 -> confidence = 0
+
         alignment_confidence = float(
             np.clip(
                 (alignment + 1.0) / 2.0,
@@ -721,14 +612,13 @@ def ai_correct_initial_degree(
             )
         )
 
-        # residual 越大，说明 Edited 越偏离 Human -> AI 主轴
+
         residual_confidence = float(
             math.exp(
                 -residual / residual_tau
             )
         )
 
-        # 使用几何平均，避免直接相乘导致惩罚过强
         geometry_confidence = float(
             math.sqrt(
                 alignment_confidence
@@ -736,9 +626,7 @@ def ai_correct_initial_degree(
             )
         )
 
-    # =========================================================
-    # 8. 最终 confidence
-    # =========================================================
+
     confidence = float(
         anchor_confidence
         * overshoot_confidence
@@ -753,9 +641,7 @@ def ai_correct_initial_degree(
         )
     )
 
-    # =========================================================
-    # 9. 返回结果
-    # =========================================================
+
     return DegreeResult(
         raw=raw,
         clipped=clipped,
@@ -779,15 +665,7 @@ def distance_ai_corrected_degree(
     d_ea: float,
     eps: float = 1e-8,
 ) -> DegreeResult:
-    """
-    Original Levenshtein/Jaccard anchor correction:
 
-        l_e = d(h, e)
-        l_a = d(h, a)
-        degree = l_e / l_a
-
-    d(e, a) is used only to estimate alignment and residual.
-    """
     values = np.asarray([d_he, d_ha, d_ea], dtype=np.float64)
     if not np.all(np.isfinite(values)) or d_ha < eps:
         return invalid_degree(
@@ -819,7 +697,7 @@ def distance_ai_corrected_degree(
     )
 
 
-# Compatibility name retained for call sites from the Human-relative patch.
+
 distance_human_relative_degree = distance_ai_corrected_degree
 
 
@@ -829,13 +707,7 @@ def semantic_ai_corrected_degree(
     z_a: np.ndarray,
     eps: float = 1e-10,
 ) -> DegreeResult:
-    """
-    Original semantic AI-anchor correction:
 
-        l_e = ||z_e - z_h|| / 2
-        l_a = ||z_a - z_h|| / 2
-        degree = l_e / l_a
-    """
     z_h = np.asarray(z_h, dtype=np.float64).reshape(-1)
     z_e = np.asarray(z_e, dtype=np.float64).reshape(-1)
     z_a = np.asarray(z_a, dtype=np.float64).reshape(-1)
@@ -885,7 +757,7 @@ def semantic_ai_corrected_degree(
     )
 
 
-# Compatibility name retained for call sites from the Human-relative patch.
+
 semantic_human_relative_degree = semantic_ai_corrected_degree
 
 
@@ -896,18 +768,7 @@ def likelihood_structure_ai_corrected_degree(
     anchor_eps: float = 1e-3,
     distance_tau: float = 1.0,
 ) -> DegreeResult:
-    """
-    Compute likelihood-based edit degree using a positive tau
-    resolved from the training-set scaler.
 
-        d_e = RMS(feature_e - feature_h)
-        d_a = RMS(feature_a - feature_h)
-
-        l_e = 1 - exp(-d_e / tau)
-        l_a = 1 - exp(-d_a / tau)
-
-        degree = l_e / l_a
-    """
     feature_h = np.asarray(feature_h,dtype=np.float64,).reshape(-1)
 
     feature_e = np.asarray(feature_e,dtype=np.float64,).reshape(-1)
@@ -935,10 +796,7 @@ def likelihood_structure_ai_corrected_degree(
     ):
         return invalid_degree()
 
-    # ---------------------------------------------------------
-    # tau必须已经由训练集拟合或显式指定。
-    # 不允许在单条三元组内部临时拟合。
-    # ---------------------------------------------------------
+
     distance_tau = float(distance_tau)
 
     if (
@@ -1042,7 +900,7 @@ def likelihood_structure_ai_corrected_degree(
     
     
 
-# Compatibility names retained for all historical call sites.
+
 likelihood_structure_human_relative_degree = likelihood_structure_ai_corrected_degree
 likelihood_ai_corrected_degree = likelihood_structure_ai_corrected_degree
 likelihood_projection_degree = likelihood_structure_ai_corrected_degree
@@ -1060,45 +918,7 @@ def fuse_degree_results(
     dict[str, float],
     dict[str, float],
 ]:
-    """
-    Confidence-weighted late fusion with disagreement-aware confidence.
-
-    Fusion degree:
-        weight_m =
-            confidence_m ** confidence_gamma
-            / sum(confidence_j ** confidence_gamma)
-
-        fusion_degree =
-            sum(weight_m * degree_m)
-
-    Fusion confidence:
-        base_confidence =
-            mean(confidence_m)
-
-        weighted_variance =
-            sum(
-                weight_m
-                * (degree_m - fusion_degree) ** 2
-            )
-
-        agreement_confidence =
-            exp(
-                -(weighted_std / agreement_tau) ** 2
-            )
-
-        coverage_confidence =
-            valid_component_count
-            / total_component_count
-
-        fusion_confidence =
-            base_confidence
-            * agreement_confidence
-            * coverage_confidence
-    """
-
-    # =========================================================
-    # 1. 检查超参数
-    # =========================================================
+   
     confidence_gamma = float(
         confidence_gamma
     )
@@ -1123,15 +943,12 @@ def fuse_degree_results(
             "agreement_tau must be a finite positive value."
         )
 
-    # Fusion 模式下一般是 4：
-    # levenshtein、jaccard、semantic、likelihood
+
     total_component_count = int(
         len(results)
     )
 
-    # =========================================================
-    # 2. 过滤无效结果
-    # =========================================================
+
     valid_items = [
         (method_name, result)
         for method_name, result in results.items()
@@ -1166,9 +983,7 @@ def fuse_degree_results(
         len(valid_items)
     )
 
-    # =========================================================
-    # 3. 所有方法均无效
-    # =========================================================
+
     if not valid_items:
         diagnostics = {
             "fusion_base_confidence": 0.0,
@@ -1194,15 +1009,7 @@ def fuse_degree_results(
             diagnostics,
         )
 
-    # =========================================================
-    # 4. 读取各方法最终编辑度
-    #
-    # 每个 result.clipped 已经完成：
-    #
-    # edited_initial_degree / ai_initial_degree
-    #
-    # 并裁剪到 [0, 1]
-    # =========================================================
+
     degrees = np.asarray(
         [
             result.clipped
@@ -1211,12 +1018,7 @@ def fuse_degree_results(
         dtype=np.float64,
     )
 
-    # =========================================================
-    # 5. 读取各方法 confidence
-    #
-    # Fusion 阶段允许使用 [0, 1] 的真实 confidence。
-    # 训练 DataLoader 后续仍可把下限限制为 0.05。
-    # =========================================================
+
     confidences = np.asarray(
         [
             result.confidence
@@ -1231,13 +1033,6 @@ def fuse_degree_results(
         1.0,
     )
 
-    # =========================================================
-    # 6. 计算 confidence 权重
-    #
-    # gamma = 1：原始 confidence 加权
-    # gamma > 1：更强调高 confidence 方法
-    # gamma < 1：减弱方法之间的权重差异
-    # =========================================================
     unnormalized_weights = np.power(
         confidences,
         confidence_gamma,
@@ -1253,7 +1048,7 @@ def fuse_degree_results(
         not np.isfinite(weight_sum)
         or weight_sum <= eps
     ):
-        # 所有 confidence 均接近 0 时，退化为等权平均
+
         weights = np.full(
             valid_component_count,
             1.0 / valid_component_count,
@@ -1265,9 +1060,7 @@ def fuse_degree_results(
             / weight_sum
         )
 
-    # =========================================================
-    # 7. 计算 Fusion degree
-    # =========================================================
+
     fused_degree = float(
         np.sum(
             weights * degrees
@@ -1282,12 +1075,6 @@ def fuse_degree_results(
         )
     )
 
-    # =========================================================
-    # 8. Base confidence
-    #
-    # 使用普通平均，不再次按 confidence 加权，
-    # 避免高 confidence 被重复强调。
-    # =========================================================
     base_confidence = float(
         np.mean(
             confidences
@@ -1302,12 +1089,7 @@ def fuse_degree_results(
         )
     )
 
-    # =========================================================
-    # 9. 计算方法间分歧
-    #
-    # degree 越一致，weighted_std 越接近 0；
-    # degree 分歧越大，weighted_std 越大。
-    # =========================================================
+
     degree_errors = (
         degrees - fused_degree
     )
@@ -1331,15 +1113,7 @@ def fuse_degree_results(
         )
     )
 
-    # =========================================================
-    # 10. Agreement confidence
-    #
-    # weighted_std = 0：
-    #     agreement_confidence = 1
-    #
-    # weighted_std 越大：
-    #     agreement_confidence 越接近 0
-    # =========================================================
+
     agreement_confidence = float(
         math.exp(
             -(
@@ -1357,15 +1131,7 @@ def fuse_degree_results(
         )
     )
 
-    # =========================================================
-    # 11. Coverage confidence
-    #
-    # 四种方法全部有效：
-    #     coverage = 4 / 4 = 1
-    #
-    # 只有三种有效：
-    #     coverage = 3 / 4 = 0.75
-    # =========================================================
+
     coverage_confidence = float(
         valid_component_count
         / max(
@@ -1382,9 +1148,7 @@ def fuse_degree_results(
         )
     )
 
-    # =========================================================
-    # 12. 最终 Fusion confidence
-    # =========================================================
+
     fused_confidence = float(
         base_confidence
         * agreement_confidence
@@ -1399,11 +1163,6 @@ def fuse_degree_results(
         )
     )
 
-    # =========================================================
-    # 13. 计算诊断字段
-    #
-    # 以下字段不会重新参与 Fusion degree 计算。
-    # =========================================================
     edited_initial_degree = float(
         np.sum([
             weight
@@ -1461,9 +1220,7 @@ def fuse_degree_results(
         0.0,
     )
 
-    # =========================================================
-    # 14. 保存各方法实际权重
-    # =========================================================
+
     fusion_weights = {
         method_name: float(weight)
         for weight, (method_name, _) in zip(
@@ -1472,9 +1229,7 @@ def fuse_degree_results(
         )
     }
 
-    # =========================================================
-    # 15. 保存 Fusion confidence 诊断信息
-    # =========================================================
+
     diagnostics = {
         "fusion_base_confidence": float(
             base_confidence
@@ -1505,12 +1260,7 @@ def fuse_degree_results(
         ),
     }
 
-    # =========================================================
-    # 16. 构造最终结果
-    #
-    # 每个 component 已经完成 AI-anchor correction，
-    # Fusion 阶段不再做第二次校正。
-    # =========================================================
+
     fused_result = DegreeResult(
         raw=fused_degree,
         clipped=fused_degree,
@@ -1534,9 +1284,7 @@ def fuse_degree_results(
         diagnostics,
     )
 
-# -----------------------------------------------------------------------------
-# Offline semantic embeddings and mean log-likelihoods
-# -----------------------------------------------------------------------------
+
 
 
 def get_model_input_device(model) -> torch.device:
@@ -1592,26 +1340,7 @@ def compute_token_logprob_features(
     min_tokens: int = 16,
     eps: float = 1e-8,
 ) -> np.ndarray:
-    """
-    Dynamically extract the features selected by TOKEN_LL_FEATURE_NAMES.
-
-    Supported features
-    ------------------
-    mean_nll:
-        -mean(ll_t)
-
-    log_fluctuation_energy:
-        log(mean((ll_t - mean(ll))^2) + eps)
-
-    log_local_roughness:
-        log(mean((ll_t - ll_(t-1))^2) + eps)
-
-    Notes
-    -----
-    - No FFT/DFT/STFT is used.
-    - No per-document z-score is applied.
-    - Output dimension and order exactly follow TOKEN_LL_FEATURE_NAMES.
-    """
+   
     feature_names = validate_token_ll_feature_names()
 
     values = np.asarray(
@@ -1697,15 +1426,7 @@ def fit_token_ll_difference_scaler(
     raw_feature_map: dict[str, np.ndarray],
     eps: float = 1e-6,
 ) -> dict[str, Any]:
-    """
-    Fit the scaler on training Human--Edited differences.
 
-    center: median Human feature vector, used only to keep stored transformed
-            features numerically well centered.
-    scale:  90th percentile of |feature_e - feature_h| per dimension.
-    tau:    median standardized H--E RMS distance divided by log(2), so the
-            median training edit maps to degree 0.5.
-    """
     human_rows = []
     difference_rows = []
 
@@ -1768,7 +1489,7 @@ def fit_token_ll_feature_scaler(
     raw_feature_map: dict[str, np.ndarray],
     eps: float = 1e-6,
 ) -> dict[str, Any]:
-    """Fallback text-level scaler for legacy/pseudo-only workflows."""
+
     feature_names = validate_token_ll_feature_names()
     valid_rows = []
     for vector in raw_feature_map.values():
@@ -1910,15 +1631,7 @@ def compute_lm_features_batch(
     dict[str, float],
     dict[str, np.ndarray],
 ]:
-    """
-    Compute, in one LM pass:
 
-    1. normalized semantic embedding;
-    2. mean conditional token log-likelihood;
-    3. raw time-domain token log-probability fluctuation features.
-
-    No FFT or frequency-domain processing is used.
-    """
     input_device = get_model_input_device(model)
     prefix_id = tokenizer.bos_token_id
     if prefix_id is None:
@@ -2046,9 +1759,6 @@ def compute_lm_features_batch(
 
     return embedding_map, ll_map, raw_ll_feature_map
 
-# -----------------------------------------------------------------------------
-# Top-k pseudo-triplet construction from label-only single-text data
-# -----------------------------------------------------------------------------
 
 
 PSEUDO_DEGREE_METHODS = (
@@ -2061,16 +1771,7 @@ PSEUDO_DEGREE_METHODS = (
 
 
 def load_label_only_samples(path: str) -> list[dict[str, Any]]:
-    """
-    Load single-text samples:
 
-        {
-            "text": "...",
-            "label": "human" | "edited" | "ai",
-            "pair_id": optional,
-            "source_id": optional
-        }
-    """
     data = load_json_list(path)
     samples: list[dict[str, Any]] = []
 
@@ -2125,7 +1826,7 @@ def compute_lm_pool_features_batch(
     dict[str, float],
     dict[str, np.ndarray],
 ]:
-    """Alias used by pseudo-triplet construction."""
+
     return compute_lm_features_batch(
         texts=texts,
         model=model,
@@ -2168,10 +1869,7 @@ def likelihood_retrieval_distance(
     candidate_text: str,
     ll_feature_map: dict[str, np.ndarray],
 ) -> float:
-    """
-    RMS Euclidean distance between robustly standardized time-domain token
-    log-probability feature vectors.
-    """
+
     query = np.asarray(
         ll_feature_map[query_text],
         dtype=np.float64,
@@ -2202,7 +1900,7 @@ def rank_topk_anchor_candidates(
     embedding_map: dict[str, np.ndarray] | None,
     ll_feature_map: dict[str, np.ndarray] | None,
 ) -> list[dict[str, Any]]:
-    """Retrieve top-k human or AI candidates for one edited sample."""
+
     if not anchor_pool:
         return []
 
@@ -2294,10 +1992,7 @@ def rank_topk_anchor_candidates(
         enriched = copy.deepcopy(anchor_item)
         enriched["_pseudo_retrieval_distance"] = score
         
-        # enriched["_pseudo_retrieval_components"] = {
-        #     name: float(component_rows[index][name])
-        #     for name in component_names
-        # }
+
         enriched["_pseudo_retrieval_components"] = {
             name: finite_float_or_none(component_rows[index][name])
             for name in component_names
@@ -2319,12 +2014,7 @@ def build_pseudo_triplet_for_edited_sample(
     ll_map: dict[str, float] | None = None,
     ll_feature_map: dict[str, np.ndarray] | None = None,
 ) -> dict[str, Any] | None:
-    """
-    Build one pseudo triplet using top-k retrieval and AI-only correction.
 
-    Likelihood retrieval and likelihood degree both use time-domain token
-    conditional-log-probability features. No FFT is used.
-    """
     degree_method = str(args.degree_method)
     retrieval_method = str(
         getattr(args, "pseudo_retrieval_method", "same")
@@ -2573,7 +2263,7 @@ def build_topk_pseudo_triplets_from_extra_file(
     args,
     device: torch.device,
 ) -> list[dict[str, Any]]:
-    """Convert label-only extra training data into temporary triplets."""
+
     if not extra_train_file:
         return []
 
@@ -2648,8 +2338,7 @@ def build_topk_pseudo_triplets_from_extra_file(
         if os.path.isfile(scaler_path):
             scaler = load_token_ll_feature_scaler(scaler_path)
         else:
-            # This occurs when likelihood is used only as pseudo retrieval and
-            # the real degree method did not need likelihood features.
+
             scaler = fit_token_ll_feature_scaler(raw_ll_feature_map)
             save_token_ll_feature_scaler(scaler_path, scaler)
             print(
@@ -2709,9 +2398,7 @@ def build_topk_pseudo_triplets_from_extra_file(
     print(f"Built pseudo triplets: {len(pseudo_triplets)}")
     return pseudo_triplets
 
-# -----------------------------------------------------------------------------
-# Triplet preparation
-# -----------------------------------------------------------------------------
+
 def finite_float_or_none(value):
     try:
         value = float(value)
@@ -2729,7 +2416,7 @@ def compute_triplet_degrees(
     ll_anchor_eps: float = 1e-3,
     likelihood_delta_tau: float = 1.0,
 ) -> dict[str, Any]:
-    """Compute an initial Human-relative degree, then apply AI-anchor correction."""
+
     h = safe_text(item["human"])
     e = safe_text(item["edited"])
     a = safe_text(item["ai"])
@@ -2821,21 +2508,14 @@ def compute_triplet_degrees(
             **result.as_dict("likelihood"),
         })
 
-        # if ll_map is not None:
-        #     item.update({
-        #         "human_mean_log_likelihood": float(ll_map[h]),
-        #         "edited_mean_log_likelihood": float(ll_map[e]),
-        #         "ai_mean_log_likelihood": float(ll_map[a]),
-        #     })
+
         if ll_map is not None:
             item.update({
                 "human_mean_log_likelihood": finite_float_or_none(ll_map[h]),
                 "edited_mean_log_likelihood": finite_float_or_none(ll_map[e]),
                 "ai_mean_log_likelihood": finite_float_or_none(ll_map[a]),
             })
-    # =========================================================
-    # Fusion 或单方法结果选择
-    # =========================================================
+
 
     if degree_method == "fusion":
         (
@@ -2848,12 +2528,12 @@ def compute_triplet_degrees(
             agreement_tau=0.15,
         )
 
-        # 保存 Fusion 自身结果
+
         item.update(
             selected.as_dict("fusion")
         )
 
-        # 保存 Fusion confidence 的诊断信息
+
         item.update(
             fusion_diagnostics
         )
@@ -2863,12 +2543,12 @@ def compute_triplet_degrees(
             "with_disagreement_penalty"
         )
 
-        # 实际参与 Fusion 的有效方法数量
+
         item["fusion_component_count"] = int(
             len(fusion_weights)
         )
 
-        # 保存各方法权重
+
         for method_name in (
             "levenshtein",
             "jaccard",
@@ -2889,9 +2569,6 @@ def compute_triplet_degrees(
             degree_method
         ]
 
-    # =========================================================
-    # 保存最终被选中的编辑度结果
-    # =========================================================
     item["edited_initial_degree"] = (
         selected.edited_initial_degree
     )
