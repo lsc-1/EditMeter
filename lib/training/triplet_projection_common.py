@@ -266,11 +266,7 @@ def compute_degree_metrics_bundle(
     true_degrees,
     pred_degrees,
 ):
-    """
-    同时计算：
-    1. 所有 Human/Edited/AI 样本上的 degree 指标；
-    2. 只针对 Edited 样本的 degree 指标。
-    """
+
     overall_metrics = compute_degree_metrics(
         true_degrees,
         pred_degrees,
@@ -414,11 +410,7 @@ def save_results(output_dir, filename, payload):
         json.dump(payload, file, ensure_ascii=False, indent=2)
     return path
 def format_metric(value, digits=4):
-    """
-    安全格式化评估指标。
 
-    当指标为 None 时返回 N/A，避免使用 :.4f 时出错。
-    """
     if value is None:
         return "N/A"
 
@@ -445,9 +437,7 @@ def evaluate_two_models_and_save_test(
     best_degree_epoch=-1,
     best_degree_score=-float("inf"),
 ):
-    # =========================================================
-    # 1. 使用分类模型进行分类和编辑度预测
-    # =========================================================
+
     cls_values = evaluate_single_text_model(
         cls_model,
         test_loader,
@@ -455,22 +445,12 @@ def evaluate_two_models_and_save_test(
         "Testing classification model",
     )
 
-    # cls_values 的结构：
-    # 0: true_labels
-    # 1: pred_labels
-    # 2: true_degrees
-    # 3: pred_degrees
-    # 4: pred_probs
-    # 5: details
 
-    # =========================================================
-    # 2. 获得最终使用的 degree predictions
-    # =========================================================
     if degree_model is cls_model:
-        # 分类和编辑度使用同一个模型
+
         degree_predictions = cls_values[3]
     else:
-        # 使用单独的编辑度模型
+
         degree_values = evaluate_single_text_model(
             degree_model,
             test_loader,
@@ -479,9 +459,7 @@ def evaluate_two_models_and_save_test(
         )
         degree_predictions = degree_values[3]
 
-    # =========================================================
-    # 3. 计算分类指标和编辑度指标
-    # =========================================================
+
     cls_metrics = compute_classification_metrics(
         cls_values[0],
         cls_values[1],
@@ -492,17 +470,13 @@ def evaluate_two_models_and_save_test(
         true_degrees=cls_values[2],
         pred_degrees=degree_predictions,
     )
-    # =========================================================
-    # 3.1 Prediction Degree Statistics
-    # =========================================================
+
     degree_stats = {
         "pred_degree_std": float(
             np.std(degree_predictions)
         )
     }
-    # =========================================================
-    # 4. 保存逐条预测详情
-    # =========================================================
+
     details = cls_values[5]
 
     for row, cls_degree, degree in zip(
@@ -513,9 +487,7 @@ def evaluate_two_models_and_save_test(
         row["pred_edit_degree_cls_model"] = float(cls_degree)
         row["pred_edit_degree"] = float(degree)
 
-    # =========================================================
-    # 5. 构造最终保存结果
-    # =========================================================
+
     payload = {
         "backbone_path": backbone_path,
 
@@ -559,137 +531,10 @@ def evaluate_two_models_and_save_test(
         "results": details,
     }
 
-    # =========================================================
-    # 6. 在终端完整打印评估结果
-    # =========================================================
-    print(
-        "\n"
-        "============================================================"
-    )
-    print("=== Two-Model Triplet Projection Test Evaluation ===")
-    print(
-        "============================================================"
-    )
-
-    print("\n[Checkpoint Information]")
-    print(f"Backbone Path     : {backbone_path}")
-    print(f"Best CLS Epoch    : {best_cls_epoch}")
-    print(
-        "Best CLS Score    : "
-        f"{format_metric(best_cls_score)}"
-    )
-    print(f"Best Degree Epoch : {best_degree_epoch}")
-    print(
-        "Best Degree Score : "
-        f"{format_metric(best_degree_score)}"
-    )
-
-    print("\n[Classification Metrics]")
-    print(
-        "Accuracy          : "
-        f"{format_metric(cls_metrics['accuracy'])}"
-    )
-    print(
-        "Balanced Accuracy : "
-        f"{format_metric(cls_metrics['balanced_accuracy'])}"
-    )
-    print(
-        "Macro-F1          : "
-        f"{format_metric(cls_metrics['macro_f1'])}"
-    )
-    print(
-        "Human F1          : "
-        f"{format_metric(cls_metrics.get('human_f1'))}"
-    )
-    print(
-        "Edited F1         : "
-        f"{format_metric(cls_metrics.get('edited_f1'))}"
-    )
-    print(
-        "AI F1             : "
-        f"{format_metric(cls_metrics.get('ai_f1'))}"
-    )
-
-    print("\n[Degree Regression Metrics]")
-    print(
-        "Degree MAE        : "
-        f"{format_metric(degree_metrics['degree_mae'])}"
-    )
-    print(
-        "Degree RMSE       : "
-        f"{format_metric(degree_metrics['degree_rmse'])}"
-    )
-    print(
-        "Degree Pearson    : "
-        f"{format_metric(degree_metrics['degree_pearson'])}"
-    )
-    print(
-        "Degree Spearman   : "
-        f"{format_metric(degree_metrics['degree_spearman'])}"
-    )
-    
-    print(
-        "Edited Degree MAE : "
-        f"{format_metric(degree_metrics.get('edited_degree_mae'))}"
-    )
-
-    print(
-        "Edited Degree RMSE: "
-        f"{format_metric(degree_metrics.get('edited_degree_rmse'))}"
-    )
-
-    print(
-        "Edited Pearson    : "
-        f"{format_metric(degree_metrics.get('edited_degree_pearson'))}"
-    )
-
-    print(
-        "Edited Spearman   : "
-        f"{format_metric(degree_metrics.get('edited_degree_spearman'))}"
-    )
-    print("\n[Predicted Degree Statistics]")
 
 
 
 
-    
-    print("\n[Confusion Matrix]")
-    print("Rows = true labels; columns = predicted labels")
-    print("Label order: [human, edited, ai]")
-    print(cls_metrics["confusion_matrix"])
-
-    print("\n[Classification Report]")
-    print(cls_metrics["classification_report_text"])
-
-    print("[Predicted Degree Statistics by True Label]")
-    print(
-        json.dumps(
-            payload["pred_degree_stats_by_true_label"],
-            indent=2,
-            ensure_ascii=False,
-        )
-    )
-
-    print("\n[Predicted Degree Statistics by Predicted Label]")
-    print(
-        json.dumps(
-            payload["pred_degree_stats_by_pred_label"],
-            indent=2,
-            ensure_ascii=False,
-        )
-    )
-    
-    print(
-        "Pred Degree Std  : "
-        f"{format_metric(degree_stats['pred_degree_std'])}"
-    )
-    print(
-        "============================================================\n"
-    )
-
-    # =========================================================
-    # 7. 保存完整结果
-    # =========================================================
     if output_dir:
         path = save_results(
             output_dir,
@@ -750,9 +595,7 @@ def evaluate_two_models_and_save_test2(
     
     
     
-    print("\n=== Triplet Projection Test Evaluation ===")
 
-    
     
     print(json.dumps({
         "accuracy": payload["accuracy"],
